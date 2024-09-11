@@ -1,4 +1,4 @@
-module github.com/ggalmazor/gh-deployment-stats-go
+module github.com/ggalmazor/gh-deployment-stats
 
 go 1.23.1
 
