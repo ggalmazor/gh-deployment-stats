@@ -17,6 +17,7 @@ platform_arch_map["win-arm64"]="windows-arm64"
 input_file="build/index.js"
 output_dir="dist"
 node_version="node14"
+version=$(jq -r '.version' package.json)
 
 mkdir -p "$output_dir"
 
@@ -26,8 +27,7 @@ for pkg_combination in "${!platform_arch_map[@]}"; do
   platform_name=$(echo "$output_combination" | cut -d'-' -f1)
   arch_name=$(echo "$output_combination" | cut -d'-' -f2)
 
-  output_file="$output_dir/gh-deployment-stats-$platform_name-$arch_name"
-
+  output_file="$output_dir/gh-deployment-stats_v${version}_${output_combination}"
   if [ "$platform_name" == "windows" ]; then
     output_file="$output_file.exe"
   fi

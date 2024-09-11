@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y git build-essential libssl-dev libplist-dev
+        run: sudo apt-get update && sudo apt-get install -y git build-essential libssl-dev libplist-dev jq
 
       - name: Install ldid from source
         run: |
