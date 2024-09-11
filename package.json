@@ -2,10 +2,10 @@
   "name": "gh-deployment-stats",
   "version": "1.0.0",
   "description": "GitHub CLI extension to get Deployment stats",
-  "main": "index.js",
+  "main": "build/index.js",
   "type": "module",
   "scripts": {
-    "test": "jest"
+    "build": "rollup -c"
   },
   "repository": {
     "type": "git",
@@ -18,10 +18,13 @@
   },
   "homepage": "https://github.com/ggalmazor/gh-deployment-stats#readme",
   "devDependencies": {
-    "@octokit/rest": "^21.0.2",
-    "@vercel/ncc": "^0.38.1",
-    "jest": "^29.7.0",
-    "node-fetch": "^3.3.2",
-    "pkg": "^5.8.1"
+    "@babel/cli": "^7.25.6",
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.4",
+    "@rollup/plugin-babel": "^6.0.4",
+    "@rollup/plugin-commonjs": "^26.0.1",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "pkg": "^5.8.1",
+    "rollup": "^4.21.2"
   }
 }

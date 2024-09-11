@@ -1,6 +1,5 @@
-import {Octokit} from "@octokit/rest";
 import {exec} from "child_process";
-import fetch from "node-fetch";
+import GHApiHelper from "./gh-api-helper.js";
 
 const getGithubTokenFromCLI = () =>
     new Promise((resolve, _) => {
@@ -13,43 +12,15 @@ const getGithubTokenFromCLI = () =>
       });
     });
 
-const initOctokit = async () => {
-  const token = await getGithubTokenFromCLI();
-  return new Octokit({
-    auth: token,
-    request: {fetch},
-  });
-};
-
 const durationSeconds = (a, b) => Math.round((new Date(b) - new Date(a)) / 1000);
 
-const computeDurationSecs = (octokit, owner, repo) => async (deployment) => {
-  const statuses = await octokit.repos.listDeploymentStatuses({
-    owner,
-    repo,
-    deployment_id: deployment.id,
-  });
-  const successStatus = statuses.data.find((status) => status.state === "success");
+const computeDurationSecs = (ghApiHelper) => async (deployment) => {
+  const successStatus = await ghApiHelper.fetchSuccessStatus(deployment.id)
   return successStatus ? durationSeconds(deployment.created_at, successStatus.created_at) : null;
 };
 
-const fetchDeploymentsFor = async (octokit, owner, repo, environment, totalPages) => {
-  const deployments = await Promise.all(
-      Array.from({length: totalPages}, (_, i) =>
-          octokit.repos.listDeployments({
-            owner,
-            repo,
-            environment,
-            per_page: 100,
-            page: i + 1,
-          })
-      )
-  );
-  return deployments.flatMap((page) => page.data);
-};
-
-const computeStats = async (octokit, owner, repo, deployments) => {
-  const durations = (await Promise.all(deployments.map(computeDurationSecs(octokit, owner, repo)))).filter(Boolean);
+const computeStats = async (ghApiHelper, deployments) => {
+  const durations = (await Promise.all(deployments.map(computeDurationSecs(ghApiHelper)))).filter(Boolean);
   const total = durations.length;
   const sum = durations.reduce((a, b) => a + b, 0);
   return {
@@ -68,9 +39,10 @@ const printStats = (group, stats) => {
 };
 
 const run = async (owner, repo, environment, cutoffISO8601) => {
-  const octokit = await initOctokit();
+  const token = await getGithubTokenFromCLI();
+  const ghApiHelper = GHApiHelper(owner, repo, token);
 
-  const deployments = await fetchDeploymentsFor(octokit, owner, repo, environment, 5);
+  const deployments = await ghApiHelper.fetchDeployments(environment, 5);
   console.log(`Fetched ${deployments.length} deployments for ${environment}:`);
 
   if (cutoffISO8601) {
@@ -78,11 +50,13 @@ const run = async (owner, repo, environment, cutoffISO8601) => {
     const oldDeployments = deployments.filter((d) => new Date(d.created_at) < cutoff);
     const newDeployments = deployments.filter((d) => new Date(d.created_at) >= cutoff);
 
-    printStats("old", await computeStats(octokit, owner, repo, oldDeployments));
-    printStats("new", await computeStats(octokit, owner, repo, newDeployments));
+    printStats("old", await computeStats(ghApiHelper, oldDeployments));
+    printStats("new", await computeStats(ghApiHelper, newDeployments));
   } else {
-    printStats(null, await computeStats(octokit, owner, repo, deployments));
+    printStats(null, await computeStats(ghApiHelper, deployments));
   }
+
+  process.exit(0);
 };
 
 const [owner, repo, environment, cutoffISO8601] = process.argv.slice(2);
@@ -92,4 +66,7 @@ if (!owner || !repo || !environment) {
   process.exit(1);
 }
 
-run(owner, repo, environment, cutoffISO8601).catch(console.error);
+run(owner, repo, environment, cutoffISO8601).catch(error => {
+  console.error(error);
+  process.exit(1);
+});
