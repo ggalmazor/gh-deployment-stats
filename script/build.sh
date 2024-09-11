@@ -16,7 +16,7 @@ platform_arch_map["win-arm64"]="windows-arm64"
 
 input_file="build/index.js"
 output_dir="dist"
-node_version="node18"
+node_version="node14"
 
 mkdir -p "$output_dir"
 
