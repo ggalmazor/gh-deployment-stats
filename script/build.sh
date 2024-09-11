@@ -33,7 +33,7 @@ for pkg_combination in "${!platform_arch_map[@]}"; do
   fi
 
   echo "Building for $pkg_combination (output: $output_combination)..."
-  pkg "$input_file" --targets "$node_version-$pkg_combination" --output "$output_file"
+  npx pkg "$input_file" --targets "$node_version-$pkg_combination" --output "$output_file"
 
   if [ $? -eq 0 ]; then
     echo "Successfully built $output_file"
