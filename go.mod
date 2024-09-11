@@ -1,6 +1,6 @@
 module github.com/ggalmazor/gh-deployment-stats
 
-go 1.23.1
+go 1.21.13
 
 require github.com/cli/go-gh/v2 v2.9.0
 
