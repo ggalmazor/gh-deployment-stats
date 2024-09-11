@@ -1,14 +1,13 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
+	"sync"
 	"time"
+
+	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 type Deployment struct {
@@ -28,96 +27,102 @@ type Stats struct {
 	MaxDurationSecs int
 }
 
-func requestGithubAPI(path string, token string) ([]byte, error) {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://api.github.com%s", path), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("User-Agent", "Go")
-	req.Header.Add("Authorization", fmt.Sprintf("token %s", token))
-	req.Header.Add("Accept", "application/vnd.github.v3+json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return nil, errors.New("GitHub API request failed")
-	}
-
-	return ioutil.ReadAll(resp.Body)
-}
-
-func fetchDeployments(owner, repo, environment, token string, totalPages int) ([]Deployment, error) {
+func fetchDeployments(client *api.RESTClient, owner, repo, environment string, totalPages int) ([]Deployment, error) {
 	var allDeployments []Deployment
-
 	for page := 1; page <= totalPages; page++ {
-		path := fmt.Sprintf("/repos/%s/%s/deployments?environment=%s&per_page=100&page=%d", owner, repo, environment, page)
-		body, err := requestGithubAPI(path, token)
+		path := fmt.Sprintf("repos/%s/%s/deployments?environment=%s&per_page=100&page=%d", owner, repo, environment, page)
+		var deployments []Deployment
+		err := client.Get(path, &deployments)
 		if err != nil {
 			return nil, err
 		}
-
-		var deployments []Deployment
-		if err := json.Unmarshal(body, &deployments); err != nil {
-			return nil, err
-		}
-
 		allDeployments = append(allDeployments, deployments...)
 	}
 
 	return allDeployments, nil
 }
 
-func fetchSuccessStatus(owner, repo, token string, deploymentID int) (*Status, error) {
-	path := fmt.Sprintf("/repos/%s/%s/deployments/%d/statuses", owner, repo, deploymentID)
-	body, err := requestGithubAPI(path, token)
+func fetchSuccessStatus(client *api.RESTClient, owner, repo string, deploymentID int) (*Status, error) {
+	path := fmt.Sprintf("repos/%s/%s/deployments/%d/statuses", owner, repo, deploymentID)
+	var statuses []Status
+	err := client.Get(path, &statuses)
 	if err != nil {
 		return nil, err
 	}
-
-	var statuses []Status
-	if err := json.Unmarshal(body, &statuses); err != nil {
-		return nil, err
-	}
+	fmt.Printf(".")
 
 	for _, status := range statuses {
 		if status.State == "success" {
 			return &status, nil
 		}
 	}
-
 	return nil, nil
+}
+
+func fetchStatusesConcurrently(client *api.RESTClient, owner, repo string, deployments []Deployment, maxWorkers int) (map[int]*Status, error) {
+	statusCh := make(chan struct {
+		ID     int
+		Status *Status
+		Err    error
+	}, len(deployments))
+
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, maxWorkers)
+
+	fmt.Printf("... fetching deployment statues ")
+	for _, deployment := range deployments {
+		wg.Add(1)
+		deployment := deployment
+		go func() {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			status, err := fetchSuccessStatus(client, owner, repo, deployment.ID)
+			<-semaphore
+
+			statusCh <- struct {
+				ID     int
+				Status *Status
+				Err    error
+			}{
+				ID:     deployment.ID,
+				Status: status,
+				Err:    err,
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(statusCh)
+		fmt.Printf(" Done\n")
+	}()
+
+	results := make(map[int]*Status)
+	for result := range statusCh {
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		results[result.ID] = result.Status
+	}
+
+	return results, nil
 }
 
 func durationSeconds(a, b time.Time) int {
 	return int(b.Sub(a).Seconds())
 }
 
-func computeDurationSecs(owner, repo, token string, deployment Deployment) (int, error) {
-	successStatus, err := fetchSuccessStatus(owner, repo, token, deployment.ID)
-	if err != nil {
-		return 0, err
-	}
-	if successStatus != nil {
-		return durationSeconds(deployment.CreatedAt, successStatus.CreatedAt), nil
-	}
-	return 0, nil
-}
-
-func computeStats(owner, repo, token string, deployments []Deployment) (Stats, error) {
+func computeStats(deployments []Deployment, statuses map[int]*Status) (Stats, error) {
 	var durations []int
 	var total, sum int
 
 	for _, deployment := range deployments {
-		duration, err := computeDurationSecs(owner, repo, token, deployment)
-		if err != nil {
-			return Stats{}, err
+		successStatus, found := statuses[deployment.ID]
+		if !found || successStatus == nil {
+			continue
 		}
+
+		duration := durationSeconds(deployment.CreatedAt, successStatus.CreatedAt)
 		if duration > 0 {
 			durations = append(durations, duration)
 		}
@@ -131,8 +136,8 @@ func computeStats(owner, repo, token string, deployments []Deployment) (Stats, e
 		return Stats{
 			Total:           total,
 			AvgDurationSecs: sum / total,
-			MinDurationSecs: min(durations),
-			MaxDurationSecs: max(durations),
+			MinDurationSecs: minFromSlice(durations),
+			MaxDurationSecs: maxFromSlice(durations),
 		}, nil
 	}
 
@@ -148,18 +153,18 @@ func printStats(group string, stats Stats) {
 		stats.Total, groupMessage, stats.AvgDurationSecs, stats.MinDurationSecs, stats.MaxDurationSecs)
 }
 
-func run(owner, repo, environment, cutoffISO8601 string) error {
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		return errors.New("GITHUB_TOKEN environment variable is not set")
-	}
-
-	deployments, err := fetchDeployments(owner, repo, environment, token, 1)
+func run(client *api.RESTClient, owner, repo, environment, cutoffISO8601 string) error {
+	deployments, err := fetchDeployments(client, owner, repo, environment, 5)
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Fetched %d deployments for %s:\n", len(deployments), environment)
+
+	statuses, err := fetchStatusesConcurrently(client, owner, repo, deployments, 10)
+	if err != nil {
+		return err
+	}
 
 	if cutoffISO8601 != "" {
 		cutoff, err := time.Parse(time.RFC3339, cutoffISO8601)
@@ -176,11 +181,11 @@ func run(owner, repo, environment, cutoffISO8601 string) error {
 			}
 		}
 
-		oldStats, err := computeStats(owner, repo, token, oldDeployments)
+		oldStats, err := computeStats(oldDeployments, statuses)
 		if err != nil {
 			return err
 		}
-		newStats, err := computeStats(owner, repo, token, newDeployments)
+		newStats, err := computeStats(newDeployments, statuses)
 		if err != nil {
 			return err
 		}
@@ -188,7 +193,7 @@ func run(owner, repo, environment, cutoffISO8601 string) error {
 		printStats("old", oldStats)
 		printStats("new", newStats)
 	} else {
-		stats, err := computeStats(owner, repo, token, deployments)
+		stats, err := computeStats(deployments, statuses)
 		if err != nil {
 			return err
 		}
@@ -210,12 +215,17 @@ func main() {
 		cutoffISO8601 = os.Args[4]
 	}
 
-	if err := run(owner, repo, environment, cutoffISO8601); err != nil {
+	client, err := api.DefaultRESTClient()
+	if err != nil {
+		log.Fatalf("Failed to create GitHub client: %v", err)
+	}
+
+	if err := run(client, owner, repo, environment, cutoffISO8601); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func min(arr []int) int {
+func minFromSlice(arr []int) int {
 	minVal := arr[0]
 	for _, v := range arr {
 		if v < minVal {
@@ -225,7 +235,7 @@ func min(arr []int) int {
 	return minVal
 }
 
-func max(arr []int) int {
+func maxFromSlice(arr []int) int {
 	maxVal := arr[0]
 	for _, v := range arr {
 		if v > maxVal {
