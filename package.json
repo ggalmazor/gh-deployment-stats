@@ -1,6 +1,6 @@
 {
   "name": "gh-deployment-stats",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "GitHub CLI extension to get Deployment stats",
   "main": "build/index.js",
   "type": "module",

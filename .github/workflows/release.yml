@@ -13,8 +13,15 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@v4
 
-      - name: Install ldid
-        run: sudo apt-get update && sudo apt-get install -y ldid
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y git build-essential libssl-dev libplist-dev
+
+      - name: Install ldid from source
+        run: |
+          git clone https://github.com/tpoechtrager/ldid.git
+          cd ldid
+          make
+          sudo install -m 755 ldid /usr/local/bin/ldid
 
       - name: Run the build script
         uses: cli/gh-extension-precompile@v1
