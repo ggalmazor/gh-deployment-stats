@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"github.com/cli/go-gh/v2/pkg/auth"
 	"log"
@@ -20,33 +21,39 @@ type Stats struct {
 	MaxDurationSecs int
 }
 
-func fetchDeployments(client *github.Client, owner, repo, environment string, maxPages int) ([]*github.Deployment, error) {
+func fetchDeployments(client *github.Client, owner, repo, environment string, totalDeployments int) ([]*github.Deployment, error) {
 	var allDeployments []*github.Deployment
 	ctx := context.Background()
-	opts := &github.DeploymentsListOptions{
-		Environment: environment,
-		ListOptions: github.ListOptions{PerPage: 100}, // Start with the first page
+
+	perPage := 100
+	if totalDeployments > 0 && totalDeployments < 100 {
+		perPage = totalDeployments
 	}
 
-	pageCounter := 0
+	opts := &github.DeploymentsListOptions{
+		Environment: environment,
+		ListOptions: github.ListOptions{PerPage: perPage},
+	}
+
+	deploymentCounter := 0
 
 	for {
-		// Fetch one page of deployments
 		deployments, resp, err := client.Repositories.ListDeployments(ctx, owner, repo, opts)
 		if err != nil {
 			return nil, err
 		}
-		// Append the deployments from this page to the total list
 		allDeployments = append(allDeployments, deployments...)
+		deploymentCounter += len(deployments)
 
-		// If there are no more pages or we've reached the max number of pages, break the loop
-		pageCounter++
-		if resp.NextPage == 0 || pageCounter >= maxPages {
+		if resp.NextPage == 0 || (totalDeployments > 0 && deploymentCounter >= totalDeployments) {
 			break
 		}
 
-		// Update the page number to fetch the next page
 		opts.Page = resp.NextPage
+	}
+
+	if totalDeployments > 0 && len(allDeployments) > totalDeployments {
+		allDeployments = allDeployments[:totalDeployments]
 	}
 
 	return allDeployments, nil
@@ -162,8 +169,8 @@ func printStats(group string, stats Stats) {
 		stats.Total, groupMessage, stats.AvgDurationSecs, stats.MinDurationSecs, stats.MaxDurationSecs)
 }
 
-func run(client *github.Client, owner, repo, environment, cutoffISO8601 string) error {
-	deployments, err := fetchDeployments(client, owner, repo, environment, 5)
+func run(client *github.Client, owner, repo, environment, cutoffISO8601 string, totalDeployments int) error {
+	deployments, err := fetchDeployments(client, owner, repo, environment, totalDeployments)
 	if err != nil {
 		return err
 	}
@@ -211,20 +218,31 @@ func run(client *github.Client, owner, repo, environment, cutoffISO8601 string) 
 
 	return nil
 }
+func customUsage() {
+	fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [-deployments] [-cutoff] <owner> <repo> <environment>\n", os.Args[0])
+	fmt.Println("\nPositional Arguments:")
+	fmt.Println("  owner         GitHub repository owner (required)")
+	fmt.Println("  repo          GitHub repository name (required)")
+	fmt.Println("  environment   Deployment environment (required)")
+	fmt.Println("\nOptions:")
+	flag.PrintDefaults() // Print all the optional flags
+}
 
 func main() {
-	if len(os.Args) < 4 {
-		fmt.Println("Usage: <owner> <repo> <environment> [cutoffISO8601]")
+	cutoffISO8601 := flag.String("cutoff", "", "Cutoff timestamp in ISO8601 format to divide results in two groups (optional)")
+	totalDeployments := flag.Int("deployments", 500, "Total number of deployments to consider (optional)")
+	flag.Usage = customUsage
+	flag.Parse()
+
+	if len(flag.Args()) < 3 {
+		customUsage()
 		os.Exit(1)
 	}
 
-	owner, repo, environment := os.Args[1], os.Args[2], os.Args[3]
-	cutoffISO8601 := ""
-	if len(os.Args) >= 5 {
-		cutoffISO8601 = os.Args[4]
-	}
+	owner := flag.Arg(0)
+	repo := flag.Arg(1)
+	environment := flag.Arg(2)
 
-	// Get the authentication token from the GitHub CLI
 	token, _ := auth.TokenForHost("github.com")
 	if token == "" {
 		log.Fatalf("Error getting GitHub auth token")
@@ -238,7 +256,8 @@ func main() {
 
 	client := github.NewClient(tc)
 
-	if err := run(client, owner, repo, environment, cutoffISO8601); err != nil {
+	// Run the main logic
+	if err := run(client, owner, repo, environment, *cutoffISO8601, *totalDeployments); err != nil {
 		log.Fatal(err)
 	}
 }

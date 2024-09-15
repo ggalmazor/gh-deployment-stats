@@ -19,6 +19,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/thlib/go-timezone-local v0.0.0-20210907160436-ef149e42d28e // indirect
 	golang.org/x/crypto v0.27.0 // indirect
 	golang.org/x/oauth2 v0.23.0 // indirect
