@@ -169,12 +169,11 @@ func printStats(group string, stats Stats) {
 		stats.Total, groupMessage, stats.AvgDurationSecs, stats.MinDurationSecs, stats.MaxDurationSecs)
 }
 
-func run(client *github.Client, owner, repo, environment, cutoffISO8601 string, totalDeployments int) error {
+func run(client *github.Client, owner string, repo string, environment string, cutoff *time.Time, totalDeployments int) error {
 	deployments, err := fetchDeployments(client, owner, repo, environment, totalDeployments)
 	if err != nil {
 		return err
 	}
-
 	fmt.Printf("Fetched %d deployments for %s:\n", len(deployments), environment)
 
 	statuses, err := fetchStatusesConcurrently(client, owner, repo, deployments, 10)
@@ -182,15 +181,10 @@ func run(client *github.Client, owner, repo, environment, cutoffISO8601 string, 
 		return err
 	}
 
-	if cutoffISO8601 != "" {
-		cutoff, err := time.Parse(time.RFC3339, cutoffISO8601)
-		if err != nil {
-			return fmt.Errorf("invalid cutoff date: %w", err)
-		}
-
+	if cutoff != nil {
 		var oldDeployments, newDeployments []*github.Deployment
 		for _, deployment := range deployments {
-			if deployment.GetCreatedAt().Time.Before(cutoff) {
+			if deployment.GetCreatedAt().Time.Before(*cutoff) {
 				oldDeployments = append(oldDeployments, deployment)
 			} else {
 				newDeployments = append(newDeployments, deployment)
@@ -219,7 +213,7 @@ func run(client *github.Client, owner, repo, environment, cutoffISO8601 string, 
 	return nil
 }
 func customUsage() {
-	fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [-deployments] [-cutoff] <owner> <repo> <environment>\n", os.Args[0])
+	_, _ = fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [-deployments] [-cutoff] <owner> <repo> <environment>\n", os.Args[0])
 	fmt.Println("\nPositional Arguments:")
 	fmt.Println("  owner         GitHub repository owner (required)")
 	fmt.Println("  repo          GitHub repository name (required)")
@@ -228,7 +222,7 @@ func customUsage() {
 	flag.PrintDefaults() // Print all the optional flags
 }
 
-func main() {
+func parseArgs() (string, string, string, *time.Time, *int) {
 	cutoffISO8601 := flag.String("cutoff", "", "Cutoff timestamp in ISO8601 format to divide results in two groups (optional)")
 	totalDeployments := flag.Int("deployments", 500, "Total number of deployments to consider (optional)")
 	flag.Usage = customUsage
@@ -243,6 +237,23 @@ func main() {
 	repo := flag.Arg(1)
 	environment := flag.Arg(2)
 
+	var cutoff *time.Time
+	if *cutoffISO8601 != "" {
+		tempCutoff, err := time.Parse(time.RFC3339, *cutoffISO8601)
+		if err != nil {
+			log.Fatalf("Error: invalid cutoff date: %v", *cutoffISO8601)
+		}
+		cutoff = &tempCutoff
+	}
+
+	if *totalDeployments <= 0 {
+		log.Fatalf("Error: deployments needs to be a positive integer")
+	}
+
+	return owner, repo, environment, cutoff, totalDeployments
+}
+
+func buildClient() *github.Client {
 	token, _ := auth.TokenForHost("github.com")
 	if token == "" {
 		log.Fatalf("Error getting GitHub auth token")
@@ -255,11 +266,7 @@ func main() {
 	tc := oauth2.NewClient(ctx, ts)
 
 	client := github.NewClient(tc)
-
-	// Run the main logic
-	if err := run(client, owner, repo, environment, *cutoffISO8601, *totalDeployments); err != nil {
-		log.Fatal(err)
-	}
+	return client
 }
 
 func minFromSlice(arr []int) int {
@@ -280,4 +287,15 @@ func maxFromSlice(arr []int) int {
 		}
 	}
 	return maxVal
+}
+
+func main() {
+	owner, repo, environment, cutoff, totalDeployments := parseArgs()
+
+	client := buildClient()
+
+	err := run(client, owner, repo, environment, cutoff, *totalDeployments)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
