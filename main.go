@@ -20,20 +20,33 @@ type Stats struct {
 	MaxDurationSecs int
 }
 
-func fetchDeployments(client *github.Client, owner, repo, environment string, totalPages int) ([]*github.Deployment, error) {
+func fetchDeployments(client *github.Client, owner, repo, environment string, maxPages int) ([]*github.Deployment, error) {
 	var allDeployments []*github.Deployment
 	ctx := context.Background()
+	opts := &github.DeploymentsListOptions{
+		Environment: environment,
+		ListOptions: github.ListOptions{PerPage: 100}, // Start with the first page
+	}
 
-	for page := 1; page <= totalPages; page++ {
-		opts := &github.DeploymentsListOptions{
-			Environment: environment,
-			ListOptions: github.ListOptions{Page: page, PerPage: 100},
-		}
-		deployments, _, err := client.Repositories.ListDeployments(ctx, owner, repo, opts)
+	pageCounter := 0
+
+	for {
+		// Fetch one page of deployments
+		deployments, resp, err := client.Repositories.ListDeployments(ctx, owner, repo, opts)
 		if err != nil {
 			return nil, err
 		}
+		// Append the deployments from this page to the total list
 		allDeployments = append(allDeployments, deployments...)
+
+		// If there are no more pages or we've reached the max number of pages, break the loop
+		pageCounter++
+		if resp.NextPage == 0 || pageCounter >= maxPages {
+			break
+		}
+
+		// Update the page number to fetch the next page
+		opts.Page = resp.NextPage
 	}
 
 	return allDeployments, nil
