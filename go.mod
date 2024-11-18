@@ -5,7 +5,7 @@ go 1.21.13
 require (
 	github.com/cli/go-gh/v2 v2.11.0
 	github.com/google/go-github/v53 v53.2.0
-	golang.org/x/oauth2 v0.23.0
+	golang.org/x/oauth2 v0.24.0
 )
 
 require (
