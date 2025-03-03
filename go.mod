@@ -1,11 +1,12 @@
 module github.com/ggalmazor/gh-deployment-stats
 
 go 1.21.13
+toolchain go1.23.6
 
 require (
 	github.com/cli/go-gh/v2 v2.11.2
 	github.com/google/go-github/v53 v53.2.0
-	golang.org/x/oauth2 v0.26.0
+	golang.org/x/oauth2 v0.27.0
 )
 
 require (
