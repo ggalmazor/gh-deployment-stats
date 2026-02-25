@@ -11,7 +11,7 @@ require (
 require (
 	github.com/ProtonMail/go-crypto v1.0.0 // indirect
 	github.com/cli/safeexec v1.0.0 // indirect
-	github.com/cloudflare/circl v1.6.1 // indirect
+	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
